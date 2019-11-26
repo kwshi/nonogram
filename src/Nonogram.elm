@@ -1,187 +1,120 @@
-module Nonogram exposing (Nonogram, empty, parrot, view)
+module Nonogram exposing (..)
 
-import Char
-import Html.Styled as Html
-import Html.Styled.Attributes as Attr
-import Html.Styled.Events as Events
-import List.Extra as List
-import Parser exposing ((|.), (|=))
+import Color exposing (Color)
+import Parser exposing (..)
 
 
-type Color
-    = Color Char
+type alias Block =
+    { count : Int
+    , color : Color
+    }
 
 
-type Block
-    = Block { count : Int, color : Color }
-
-
-type Nonogram
-    = Nonogram
-        { rows : List (List Block)
-        , cols : List (List Block)
-        }
+type alias Nonogram =
+    { rows : List (List Block)
+    , cols : List (List Block)
+    }
 
 
 block : Int -> Color -> Block
-block count clr =
-    Block { count = count, color = clr }
+block =
+    Block
 
 
-color : Char -> Color
-color =
-    Color
-
-
-empty : Nonogram
-empty =
+nonogram : List (List Block) -> List (List Block) -> Nonogram
+nonogram =
     Nonogram
-        { rows = []
-        , cols = []
-        }
 
 
-parrot : Nonogram
-parrot =
-    Nonogram
-        { rows =
-            [ [ block 4 (color 'c') ]
-            ]
-        , cols = []
-        }
-
-apple : Nonogram
-apple =
-    Nonogram
-        { rows =
-              [ [ block 4 (color 'g')]
-              , [block 5 (color 'g')]
-              , [block 6 (color 'g'), block 1 (color 'k')]
-              , [block 6 (color 'g'), block 2 (color 'k')]
-              , [block 3 (color 'r'), block 1 (color 'g'), block 2 (color 'k'), block 3 (color 'r')]
-              , []
-              ]
-              , cols =
-              []
-        }
-
-
-view : Nonogram -> Html.Html a
-view (Nonogram { rows, cols }) =
-    Html.table
-        []
-        (rows
-            |> List.map
-                (\row ->
-                    Html.tr
-                        []
-                        [ Html.th []
-                            (row
-                                |> List.map
-                                    (\(Block { count }) -> Html.text (String.fromInt count))
-                            )
-                        ]
-                )
+formatBlocks : List (List Block) -> String
+formatBlocks =
+    List.map
+        (List.map
+            (\{ count, color } ->
+                String.fromInt count
+                    ++ String.fromChar (Color.format color)
+            )
+            >> String.join " "
         )
+        >> String.join "\n"
 
 
+format : Nonogram -> String
+format { rows, cols } =
+    formatBlocks rows ++ "\n/\n" ++ formatBlocks cols
 
---parseColor : String -> Maybe Color
---parseColor s =
---    case String.toList s of
---        [ c ] ->
---            Just (Color c)
---
---        _ ->
---            Nothing
---
---
---parseBlock : String -> Maybe Block
---parseBlock s =
---    let
---        ( countStr, colorStr ) =
---            String.toList s
---                |> List.span Char.isDigit
---    in
---    Maybe.map2
---        (\ct clr -> Block { count = ct, color = clr })
---        (String.fromList countStr |> String.toInt)
---        (String.fromList colorStr |> parseColor)
---spaces : Parser.Parser ()
---spaces =
---    Parser.loop ()
---        (\() ->
---            Parser.oneOf
---                [ Parser.succeed (Parser.Loop ())
---                    |. Parser.symbol " "
---                , Parser.succeed (Parser.Done ())
---                ]
---        )
---
---
---int : Parser.Parser Int
---int =
---    Parser.chompWhile Char.isDigit
---        |> Parser.getChompedString
---        |> Parser.andThen
---            (\s ->
---                case String.toInt s of
---                    Just n ->
---                        Parser.succeed n
---
---                    Nothing ->
---                        Parser.problem "expecting integer"
---            )
---
---
---block : Parser.Parser Block
---block =
---    Parser.succeed Block
---        |= int
---        |. Parser.spaces
---        |= (Parser.chompIf Char.isAlpha
---                |> Parser.getChompedString
---                |> Parser.andThen
---                    (\s ->
---                        case String.uncons s of
---                            Just ( c, _ ) ->
---                                Parser.succeed (Color c)
---
---                            Nothing ->
---                                Parser.problem "expecting a letter"
---                    )
---           )
---
---
---blocks : Parser.Parser (List Block)
---blocks =
---    Parser.loop
---        []
---        (\bs ->
---            Parser.oneOf
---                [ Parser.succeed (\b -> Parser.Loop (b :: bs))
---                    |= block
---                    |. spaces
---                , Parser.succeed ()
---                    |> Parser.map (\() -> Parser.Done (List.reverse bs))
---                ]
---        )
---
---
---series : Parser.Parser (List (List Block))
---series =
---    Parser.sequence
---        { start = ""
---        , separator = "\n"
---        , end = ""
---        , spaces = spaces
---        , item = blocks
---        , trailing = Parser.Forbidden
---        }
---
---
---
-----parser : Parser.Parser (Nonogram)
-----parser =
-----    Parser.succeed Nonogram
-----        |= blocks
+
+blockParser : Parser Block
+blockParser =
+    succeed Block
+        |= (chompWhile Char.isDigit
+                |> getChompedString
+                |> andThen
+                    (\s ->
+                        case String.toInt s of
+                            Just n ->
+                                succeed n
+
+                            Nothing ->
+                                problem "expect int"
+                    )
+           )
+        |= (chompWhile Char.isAlpha
+                |> getChompedString
+                |> andThen
+                    (\s ->
+                        case String.uncons s of
+                            Nothing ->
+                                succeed Color.default
+
+                            Just ( c, "" ) ->
+                                Color.get c
+                                    |> Maybe.map succeed
+                                    |> Maybe.withDefault (problem "unrecognized color")
+
+                            _ ->
+                                problem "too many characters"
+                    )
+           )
+
+
+lineParser : Parser (List Block)
+lineParser =
+    sequence
+        { start = ""
+        , end = ""
+        , separator = " "
+        , item = blockParser
+        , spaces = succeed ()
+        , trailing = Optional
+        }
+        |. chompWhile ((==) ' ')
+
+
+blocksParser : Trailing -> Parser (List (List Block))
+blocksParser trailing =
+    sequence
+        { start = ""
+        , end = ""
+        , separator = "\n"
+        , item = lineParser
+        , spaces = succeed ()
+        , trailing = trailing
+        }
+
+
+parser : Parser Nonogram
+parser =
+    succeed Nonogram
+        |. loop ()
+            (always <|
+                oneOf
+                    [ lineComment "#" |. chompIf ((==) '\n') |> map Loop
+                    , succeed () |> map Done
+                    ]
+            )
+        |= blocksParser Mandatory
+        |. symbol "/"
+        |. chompWhile ((==) ' ')
+        |. token "\n"
+        |= blocksParser Forbidden
